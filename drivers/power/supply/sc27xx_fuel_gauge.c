@@ -1064,7 +1064,9 @@ static irqreturn_t sc27xx_fgu_bat_detection(int irq, void *dev_id)
 		return IRQ_RETVAL(state);
 	}
 
-	data->bat_present = !!state;
+	/* W527: non-removable battery, see probe comment */
+	data->bat_present = true;
+	(void)state;
 
 	mutex_unlock(&data->lock);
 
@@ -1400,7 +1402,16 @@ static int sc27xx_fgu_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	data->bat_present = !!ret;
+	/*
+	 * W527: battery is non-removable. The OEM board leaves the
+	 * bat-detect pin (PMIC EIC #3, gpio-115) low, so the GPIO level
+	 * cannot be trusted: r34 reads lo -> present=0 which permanently
+	 * blocks eta6947 charging (status "Not charging", ICL pinned 0).
+	 * Force present.
+	 */
+	dev_info(&pdev->dev, "W527 bat-detect gpio raw=%d, force present=1\n",
+		 ret);
+	data->bat_present = true;
 	mutex_init(&data->lock);
 	data->dev = &pdev->dev;
 	platform_set_drvdata(pdev, data);
