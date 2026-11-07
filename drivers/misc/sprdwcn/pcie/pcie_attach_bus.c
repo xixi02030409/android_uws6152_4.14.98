@@ -146,7 +146,6 @@ static struct sprdwcn_bus_ops pcie_bus_ops = {
 	.write_l = pcie_write32,
 	.update_bits = pcie_update_bits,
 	.get_hwintf_type = pcie_get_hwintf_type,
-	.get_bus_status = pcie_get_bus_status,
 	.get_carddump_status = pcie_get_carddump_status,
 	.set_carddump_status = pcie_set_carddump_status,
 	.get_pm_policy = pcie_get_aspm_policy,

@@ -1,0 +1,6 @@
+config SENSORS_MIR3DA
+	bool "mir3da/da21x gsensor (W527)"
+	depends on I2C
+	default y
+	help
+	  MiraSensor gsensor for W527 (legacy i2c board info registration).

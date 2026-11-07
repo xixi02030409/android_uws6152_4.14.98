@@ -182,10 +182,18 @@ union wcn_chn_config {
 #endif
 
 struct mchn_ops_t {
-	/* hardware interface type */
-	enum wcn_hard_intf_type hif_type;
+	/*
+	 * W527 ABI fix: factory (UWS6152 divo-63) field order is
+	 * {channel, hif_type} — bus_chn_init indexes ops[] with
+	 * *(int*)ops and stores the param hif_type at +0x04. ZeroDreamCat
+	 * upstream had them swapped, so vendor .ko registered channel 22
+	 * (WiFi DATA TX) while the kernel checked ops[0] -> -1,
+	 * sprdwl_probe intf init failed.
+	 */
 	/* channel index for wf/bt/fm */
 	int channel;
+	/* hardware interface type */
+	enum wcn_hard_intf_type hif_type;
 	/* channel config paras */
 #ifdef CONFIG_WCN_SIPC
 	union wcn_chn_config chn_config;
@@ -239,7 +247,18 @@ struct sprdwcn_bus_ops {
 	int (*chn_deinit)(struct mchn_ops_t *ops);
 
 	enum wcn_hard_intf_type (*get_hwintf_type)(void);
-	int (*get_bus_status)(void);
+
+	/*
+	 * W527 ABI fix: get_bus_status member REMOVED.
+	 * Factory (UWS6152 divo-63) struct has no get_bus_status; the
+	 * vendor .ko (sprdbt_tty/sprdwl_ng, built against factory
+	 * headers) expects list_alloc at +0x28 and push_list at +0x38.
+	 * Keeping get_bus_status shifted every member after +0x20 by
+	 * 8 bytes and made the BT HAL crash at sdio_data_transmit
+	 * (ops->get_bus_status called as list_alloc returned the bus
+	 * status 0, module dereferenced a NULL mbuf pointer).
+	 * get_hwintf_type must stay: drivers/wcn bt/fm call it.
+	 */
 
 	/*
 	 * For sdio:
@@ -341,12 +360,8 @@ void sprdwcn_bus_deinit(void)
 static inline
 int sprdwcn_bus_get_status(void)
 {
-	struct sprdwcn_bus_ops *bus_ops = get_wcn_bus_ops();
-
-	if (!bus_ops || !bus_ops->deinit)
-		return 0;
-
-	return bus_ops->get_bus_status();
+	/* W527 ABI fix: get_bus_status removed from struct, see above */
+	return 1;
 }
 
 static inline

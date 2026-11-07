@@ -1,0 +1,1 @@
+obj-$(CONFIG_SENSORS_QMC6308) += qmc6308.o
