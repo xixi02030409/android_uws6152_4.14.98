@@ -1952,6 +1952,9 @@ static int parse_options(char *options, struct super_block *sb,
 		 * Initialize args struct so we know whether arg was
 		 * found; some options take optional arguments.
 		 */
+		/* Accept inlinecrypt (A11 fstab compat): software fscrypt fallback */
+		if (!strcmp(p, "inlinecrypt"))
+			continue;
 		args[0].to = args[0].from = NULL;
 		token = match_token(p, tokens, args);
 		if (handle_mount_opt(sb, p, token, args, journal_devnum,

@@ -59,6 +59,7 @@ struct workqueue_struct;
 struct iov_iter;
 struct fscrypt_info;
 struct fscrypt_operations;
+struct key;
 
 extern void __init inode_init(void);
 extern void __init inode_init_early(void);
@@ -1361,6 +1362,9 @@ struct super_block {
 	const struct xattr_handler **s_xattr;
 
 	const struct fscrypt_operations	*s_cop;
+#ifdef CONFIG_FS_ENCRYPTION
+	struct key		*s_master_keys;
+#endif
 
 	struct hlist_bl_head	s_anon;		/* anonymous dentries for (nfs) exporting */
 	struct list_head	s_mounts;	/* list of mounts; _not_ for fs use */
