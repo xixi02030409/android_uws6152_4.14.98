@@ -1,0 +1,8 @@
+config BD1860
+	bool "BD1860 heart-rate sensor driver + decompiled health algorithm (W527)"
+	depends on I2C
+	default y
+	help
+	  BD1860 HR sensor: factory-transaction driver (r43 pipeline) with
+	  r44 decompiled health algorithm cluster (FFT/IIR/HR/HRV/SPO2/BP).
+	  Debug prints are gated behind module param `dbg` (default OFF, r51/r52).

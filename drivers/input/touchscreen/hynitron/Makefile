@@ -1,10 +1,13 @@
 
 # Linux driver folder
 
-# r30: enable combined-transaction I2C path (no per-op printk).
-# Console=ttyS1@115200 stalls ~4ms per printk; touch report path
-# does 3-4 I2C ops/frame => 12-16ms/frame eaten by console.
+# Enable i2c_transfer based high-speed IIC path (single combined transaction
+# for read_register, no per-transaction printk). Factory (divo-63) kernel does
+# NOT contain the "cst3xx_i2c_write ret" printk strings, proving the fast path
+# is the correct baseline. Without this define every touch report does 2
+# separate I2C bus transactions + 2 unconditional printks -> touch lag.
 ccflags-y += -DHIGH_SPEED_IIC_TRANSFER
+
 obj-$(CONFIG_TOUCHSCREEN_HYNITRON_TS) += hynitron_touch.o
 
 hynitron_touch-objs	+= hynitron_core.o

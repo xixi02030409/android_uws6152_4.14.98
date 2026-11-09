@@ -9,6 +9,7 @@
 #include <linux/alarmtimer.h>
 #include <linux/interrupt.h>
 #include <linux/i2c.h>
+#include <linux/jiffies.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -206,6 +207,10 @@ struct eta6947_charger_info {
 	bool otg_enable;
 	struct alarm otg_timer;
 	bool need_reinit;
+	/* factory alignment (r54): throttled psy notification + debug class */
+	unsigned long last_changed;
+	struct class *dbg_class;
+	struct device *dbg_dev;
 };
 
 static int eta6947_charger_set_limit_current(struct eta6947_charger_info *info, u32 limit_cur);
@@ -282,6 +287,62 @@ static int eta6947_charger_set_max_batt_reg_vol(struct eta6947_charger_info *inf
 				   (reg_val << ETA6947_REG_VMREG_SHIFT));
 }
 
+/*
+ * factory alignment (r54): rate-limit power_supply_changed to once per
+ * 125 jiffies (1.25s @ HZ=100). Decompiled from factory kernel
+ * eta6947_psy_changed_throttled @ ffffff80086292bc.
+ */
+static void eta6947_psy_changed_throttled(struct eta6947_charger_info *info)
+{
+	unsigned long now = jiffies;
+
+	if (time_after_eq(now, info->last_changed + HZ + HZ / 4)) {
+		info->last_changed = now;
+		power_supply_changed(info->psy_usb);
+	}
+}
+
+/*
+ * factory alignment (r54): dump REG0-9 for debug, mirrors factory
+ * eta6947_dump_reg @ ffffff8008629438 ("[eta6947x] %s %d : REG xx: 0x%02x").
+ */
+static void eta6947_dump_reg(struct eta6947_charger_info *info)
+{
+	u8 val;
+	int i, ret;
+
+	for (i = 0; i <= 9; i++) {
+		ret = eta6947_read(info, i, &val);
+		if (ret)
+			continue;
+		dev_info(info->dev, "%s %d : REG %02d: 0x%02x\n",
+			 __func__, __LINE__, i, val);
+	}
+}
+
+/*
+ * factory alignment (r54): read constant-charge voltage (mV) from the
+ * sc27xx-fgu power supply's battery info, mirrors factory
+ * eta6947_read_cv_mv @ ffffff8008629fb0 (fgu name string kept identical).
+ */
+static int eta6947_read_cv_mv(int *cv_mv)
+{
+	struct power_supply *psy;
+	struct power_supply_battery_info bat_info = { };
+	int ret;
+
+	psy = power_supply_get_by_name("sc27xx-fgu");
+	if (!psy)
+		return -ENODEV;
+
+	ret = power_supply_get_battery_info(psy, &bat_info);
+	if (!ret && cv_mv)
+		*cv_mv = bat_info.constant_charge_voltage_max_uv / 1000;
+	power_supply_put_battery_info(psy, &bat_info);
+
+	return ret;
+}
+
 static int eta6947_charger_set_termina_vol(struct eta6947_charger_info *info, u32 vol)
 {
 	u8 reg_val;
@@ -292,6 +353,11 @@ static int eta6947_charger_set_termina_vol(struct eta6947_charger_info *info, u3
 		vol =  ETA6947_CHG_VOREG_MAX;
 
 	reg_val = (vol - ETA6947_CHG_VOREG_MIN) / ETA6947_CHG_VOREG_STEP;
+
+	dev_info(info->dev, "%s %d : set termina vol, vol=%d\n",
+		 __func__, __LINE__, vol);
+	dev_info(info->dev, "%s %d : reg_val=0x%02x\n",
+		 __func__, __LINE__, reg_val << ETA6947_REG_VOREG_SHIFT);
 
 	return eta6947_update_bits(info, ETA6947_REG_2, ETA6947_REG_VOREG_MASK,
 				   reg_val << ETA6947_REG_VOREG_SHIFT);
@@ -898,6 +964,23 @@ static int eta6947_charger_usb_set_property(struct power_supply *psy,
 		ret = -EINVAL;
 	}
 
+	/*
+	 * factory alignment (r54): after a successful property write, notify
+	 * the power supply framework (throttled) and dump registers, mirrors
+	 * factory usb_set_property tail (psy_changed_throttled + dump_reg).
+	 */
+	if (ret >= 0 && psp != POWER_SUPPLY_PROP_FEED_WATCHDOG) {
+		if (psp == POWER_SUPPLY_PROP_STATUS && val->intval) {
+			int cv = 0;
+
+			/* re-align charge termination voltage with fgu battery info */
+			if (!eta6947_read_cv_mv(&cv) && cv)
+				eta6947_charger_set_termina_vol(info, cv);
+		}
+		eta6947_psy_changed_throttled(info);
+		eta6947_dump_reg(info);
+	}
+
 	mutex_unlock(&info->lock);
 	return ret;
 }
@@ -920,6 +1003,88 @@ static int eta6947_charger_property_is_writeable(struct power_supply *psy,
 
 	return ret;
 }
+
+/*
+ * factory alignment (r54): /sys/class/eta6947/eta6947/eta6947_info debug
+ * interface, mirrors factory eta6947_class/eta6947_group/eta6947_attrs/
+ * eta6947_info_show/eta6947_info_store. show = decode REG0 STAT1_STAT2
+ * charge state; store = manual charge current set (550-3150 mA).
+ */
+static ssize_t eta6947_info_show(struct device *dev,
+				 struct device_attribute *attr, char *buf)
+{
+	struct eta6947_charger_info *info = dev_get_drvdata(dev);
+	const char *state;
+	u8 val = 0;
+	int ret;
+
+	ret = eta6947_read(info, ETA6947_REG_0, &val);
+	if (ret)
+		state = "charge unknown";
+	else {
+		switch ((val >> 4) & 0x3) {
+		case 1:
+			state = "charge in progress";
+			break;
+		case 2:
+			state = "charge done";
+			break;
+		case 3:
+			state = "charge fault";
+			break;
+		default:
+			state = "charge ready";
+			break;
+		}
+	}
+
+	dev_info(info->dev, "%s %d : %s\n", __func__, __LINE__, state);
+	return scnprintf(buf, PAGE_SIZE, "%s\n", state);
+}
+
+static ssize_t eta6947_info_store(struct device *dev,
+				  struct device_attribute *attr,
+				  const char *buf, size_t count)
+{
+	struct eta6947_charger_info *info = dev_get_drvdata(dev);
+	int val, ret;
+
+	ret = kstrtoint(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	/* factory range check: unsigned (val - 550) <= 2600 => [550, 3150] mA */
+	if (val < 550 || val - 550 > 2600) {
+		dev_err(info->dev, "eta6947: current %d mA out of range (%d-%d)\n",
+			val, 550, 3150);
+		return -EINVAL;
+	}
+
+	ret = eta6947_charger_set_current(info, val * 1000);
+	if (ret) {
+		dev_err(info->dev, "eta6947: set current %d mA failed, ret = %d\n",
+			val, ret);
+		return ret;
+	}
+
+	return count;
+}
+
+static DEVICE_ATTR(eta6947_info, 0644, eta6947_info_show, eta6947_info_store);
+
+static struct attribute *eta6947_attrs[] = {
+	&dev_attr_eta6947_info.attr,
+	NULL,
+};
+
+static const struct attribute_group eta6947_group = {
+	.attrs = eta6947_attrs,
+};
+
+static const struct attribute_group *eta6947_groups[] = {
+	&eta6947_group,
+	NULL,
+};
 
 static enum power_supply_usb_type eta6947_charger_usb_types[] = {
 	POWER_SUPPLY_USB_TYPE_UNKNOWN,
@@ -1271,6 +1436,24 @@ static int eta6947_charger_probe(struct i2c_client *client,
 	INIT_DELAYED_WORK(&info->wdt_work,
 			  eta6947_charger_feed_watchdog_work);
 
+	/* factory alignment (r54): /sys/class/eta6947 debug class */
+	info->dbg_class = class_create(THIS_MODULE, "eta6947");
+	if (IS_ERR(info->dbg_class)) {
+		dev_err(dev, "failed to create eta6947 debug class\n");
+		info->dbg_class = NULL;
+	} else {
+		info->dbg_dev = device_create_with_groups(info->dbg_class, dev,
+							  MKDEV(0, 0), info,
+							  eta6947_groups,
+							  "eta6947");
+		if (IS_ERR(info->dbg_dev)) {
+			dev_err(dev, "failed to create eta6947 debug device\n");
+			info->dbg_dev = NULL;
+			class_destroy(info->dbg_class);
+			info->dbg_class = NULL;
+		}
+	}
+
 	dev_info(dev, "Hello!Do you want to eat 6947?SoraNeko is waiting for you!\n");
 
 	return 0;
@@ -1279,6 +1462,16 @@ static int eta6947_charger_probe(struct i2c_client *client,
 static int eta6947_charger_remove(struct i2c_client *client)
 {
 	struct eta6947_charger_info *info = i2c_get_clientdata(client);
+
+	/* factory alignment (r54): tear down debug class */
+	if (info->dbg_dev) {
+		device_destroy(info->dbg_class, MKDEV(0, 0));
+		info->dbg_dev = NULL;
+	}
+	if (info->dbg_class) {
+		class_destroy(info->dbg_class);
+		info->dbg_class = NULL;
+	}
 
 	usb_unregister_notifier(info->usb_phy, &info->usb_notify);
 
@@ -1364,7 +1557,31 @@ static struct i2c_driver eta6947_charger_driver = {
 	.id_table = eta6947_i2c_id,
 };
 
-module_i2c_driver(eta6947_charger_driver);
+/*
+ * factory alignment (r54): explicit init/exit with register-failure print,
+ * mirrors factory eta6947_init @ ffffff8008d671cc (i2c_register_driver path).
+ */
+static int __init eta6947_init(void)
+{
+	int ret;
+
+	ret = i2c_register_driver(THIS_MODULE, &eta6947_charger_driver);
+	if (ret) {
+		pr_err("eta6947: failed to register i2c driver, ret = %d\n", ret);
+		return -ENODEV;
+	}
+	pr_info("eta6947: registered i2c driver, ret = %d\n", ret);
+
+	return ret;
+}
+
+static void __exit eta6947_exit(void)
+{
+	i2c_del_driver(&eta6947_charger_driver);
+}
+
+module_init(eta6947_init);
+module_exit(eta6947_exit);
 MODULE_AUTHOR("ZeroDreamCat <neko@0w0.cafe>");
 MODULE_DESCRIPTION("ETA6947 Charger Driver");
 MODULE_LICENSE("GPL v2");
