@@ -545,3 +545,9 @@ source "drivers/misc/sprdwcn/Kconfig"
 source "drivers/misc/sprd_audio/Kconfig"
 source "drivers/misc/sprd_apdu/Kconfig"
 endmenu
+source "drivers/misc/bd1860/Kconfig"
+config HXD019_IR
+	bool "HXD019 IR transmitter (W527, r39)"
+	depends on I2C
+	default y
+

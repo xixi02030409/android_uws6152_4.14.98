@@ -655,6 +655,15 @@ static int sc27xx_fgu_get_temp(struct sc27xx_fgu_data *data, int *temp)
 	if (ret < 0)
 		return ret;
 
+	/* W527-r41b-ntc-fallback: NTC floating detection (W527 board has no NTC
+	 * fitted; ADC pegs high near 1850mV full-scale, reads ~4080/4095).
+	 * Report a safe fixed 25.0C so charge limiting and UI behave. */
+	if (vol > 1750 || vol < 50) {
+		*temp = 250;
+		*temp = sc27xx_fgu_get_average_temp(data, *temp);
+		return 0;
+	}
+
 	if (data->comp_resistance) {
 		int bat_current, resistance_vol;
 
@@ -761,7 +770,7 @@ static int sc27xx_fgu_get_property(struct power_supply *psy,
 
 	case POWER_SUPPLY_PROP_TEMP:
 		if (data->temp_table_len <= 0) {
-			val->intval = 200;
+			val->intval = 250; /* W527-r41b: no NTC table in DTB; report safe 25.0C */
 		} else {
 			ret = sc27xx_fgu_get_temp(data, &value);
 			if (ret < 0)
@@ -1064,7 +1073,8 @@ static irqreturn_t sc27xx_fgu_bat_detection(int irq, void *dev_id)
 		return IRQ_RETVAL(state);
 	}
 
-	data->bat_present = !!state;
+	/* W527: non-removable battery, see probe comment */
+	data->bat_present = true;
 
 	mutex_unlock(&data->lock);
 
@@ -1400,7 +1410,11 @@ static int sc27xx_fgu_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	data->bat_present = !!ret;
+	/* W527: non-removable battery, bat-detect pin (PMIC EIC #3) reads lo
+	 * while factory reports present=1 -> GPIO level untrusted.
+	 * present=0 blocks eta6947 charging (Not charging, ICL pinned 0). */
+	dev_info(&pdev->dev, "W527 bat-detect raw=%d, force present=1\n", ret);
+	data->bat_present = true;
 	mutex_init(&data->lock);
 	data->dev = &pdev->dev;
 	platform_set_drvdata(pdev, data);
