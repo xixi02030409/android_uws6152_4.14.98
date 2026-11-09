@@ -11,6 +11,7 @@
 #ifndef __BCM_SYSPORT_H
 #define __BCM_SYSPORT_H
 
+#include <linux/ethtool.h>
 #include <linux/if_vlan.h>
 
 /* Receive/transmit descriptor format */
@@ -732,6 +733,7 @@ struct bcm_sysport_priv {
 	int			wol_irq;
 
 	/* Transmit rings */
+	spinlock_t		desc_lock;
 	struct bcm_sysport_tx_ring *tx_rings;
 
 	/* Receive queue */
@@ -754,6 +756,7 @@ struct bcm_sysport_priv {
 	unsigned int		crc_fwd:1;
 	u16			rev;
 	u32			wolopts;
+	u8			sopass[SOPASS_MAX];
 	unsigned int		wol_irq_disabled:1;
 
 	/* MIB related fields */

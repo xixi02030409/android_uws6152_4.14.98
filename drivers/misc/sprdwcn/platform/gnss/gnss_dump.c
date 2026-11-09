@@ -204,7 +204,7 @@ static int gnss_dump_cp_register_data(u32 addr, u32 len)
 		return -ENOMEM;
 	}
 
-	if (IS_ERR(gnss_dump_file)) {
+	if (!gnss_dump_file || IS_ERR(gnss_dump_file)) {
 		gnss_dump_file = filp_open(GNSS_MEMDUMP_PATH,
 			O_RDWR | O_CREAT | O_APPEND, 0666);
 		if (IS_ERR(gnss_dump_file)) {
@@ -269,7 +269,7 @@ static int gnss_dump_ap_register(void)
 	struct regmap_dump *gnss_ap_reg = NULL;
 
 	GNSSDUMP_INFO("%s ap reg data\n", __func__);
-	if (IS_ERR(gnss_dump_file)) {
+	if (!gnss_dump_file || IS_ERR(gnss_dump_file)) {
 		gnss_dump_file = filp_open(GNSS_MEMDUMP_PATH,
 			O_RDWR | O_CREAT | O_APPEND, 0666);
 		if (IS_ERR(gnss_dump_file)) {
@@ -387,7 +387,7 @@ static int gnss_dump_share_memory(u32 len)
 		return -1;
 	}
 
-	if (IS_ERR(gnss_dump_file)) {
+	if (!gnss_dump_file || IS_ERR(gnss_dump_file)) {
 		gnss_dump_file = filp_open(GNSS_MEMDUMP_PATH,
 			O_RDWR | O_CREAT | O_APPEND, 0666);
 		if (IS_ERR(gnss_dump_file)) {
@@ -478,7 +478,7 @@ static int gnss_ext_dump_data(unsigned int start_addr, int len)
 		return -ENOMEM;
 	}
 
-	if (IS_ERR(gnss_dump_file)) {
+	if (!gnss_dump_file || IS_ERR(gnss_dump_file)) {
 		gnss_dump_file = filp_open(GNSS_MEMDUMP_PATH,
 			O_RDWR | O_CREAT | O_APPEND, 0666);
 		if (IS_ERR(gnss_dump_file)) {

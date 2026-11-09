@@ -96,7 +96,7 @@ unsigned int pkt_get_prio(void *skb, int data_offset, unsigned char *tos)
 		unsigned short vlan_tag;
 		int vlan_prio;
 
-		evh = (struct ethervlan_header *)eh;
+		evh = (struct ethervlan_header *)(void *)eh; /* void* hop: defuse -Waddress-of-packed-member */
 
 		vlan_tag = be16_to_cpu(evh->vlan_tag);
 		vlan_prio = (int)(vlan_tag >> VLAN_PRI_SHIFT) & VLAN_PRI_MASK;

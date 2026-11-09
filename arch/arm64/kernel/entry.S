@@ -1153,3 +1153,15 @@ ENTRY(ret_from_fork)
 	b	ret_to_user
 ENDPROC(ret_from_fork)
 NOKPROBE(ret_from_fork)
+
+/*
+ * 336 vectors.h (merged) declares __bp_harden_el1_vectors; upstream defines
+ * it in entry.S. With vendor config (no CONFIG_MITIGATE_SPECTRE_BRANCH_HISTORY)
+ * the upstream definition degenerates to an empty alignment stub. Provide the
+ * same so 336 cpu code links; runtime users (KPTI path) take TRAMP_VALIAS.
+ */
+	.pushsection ".entry.text", "ax"
+	.align	11
+ENTRY(__bp_harden_el1_vectors)
+END(__bp_harden_el1_vectors)
+	.popsection

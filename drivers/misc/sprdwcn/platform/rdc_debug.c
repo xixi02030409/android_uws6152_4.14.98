@@ -80,7 +80,7 @@ int dumpmem_rx_callback(void *addr, unsigned int len)
 	ssize_t ret;
 
 	WCN_INFO("%s\n", __func__);
-	if (IS_ERR(dump_file))
+	if (!dump_file || IS_ERR(dump_file))
 		return -1;
 	ret = kernel_write(dump_file, addr, len, &mem_pos);
 	if (ret != len) {

@@ -292,7 +292,7 @@ __be32 fib_compute_spec_dst(struct sk_buff *skb)
 			.flowi4_iif = LOOPBACK_IFINDEX,
 			.flowi4_oif = l3mdev_master_ifindex_rcu(dev),
 			.daddr = ip_hdr(skb)->saddr,
-			.flowi4_tos = RT_TOS(ip_hdr(skb)->tos),
+			.flowi4_tos = ip_hdr(skb)->tos & IPTOS_RT_MASK,
 			.flowi4_scope = scope,
 			.flowi4_mark = vmark ? skb->mark : 0,
 		};
@@ -529,6 +529,9 @@ static int rtentry_to_fib_config(struct net *net, int cmd, struct rtentry *rt,
 			cfg->fc_scope = RT_SCOPE_UNIVERSE;
 	}
 
+	if (!cfg->fc_table)
+		cfg->fc_table = RT_TABLE_MAIN;
+
 	if (cmd == SIOCDELRT)
 		return 0;
 
@@ -675,6 +678,10 @@ static int rtm_to_fib_config(struct net *net, struct sk_buff *skb,
 		case RTA_GATEWAY:
 			cfg->fc_gw = nla_get_be32(attr);
 			break;
+		case RTA_VIA:
+			NL_SET_ERR_MSG(extack, "IPv4 does not support RTA_VIA attribute");
+			err = -EINVAL;
+			goto errout;
 		case RTA_PRIORITY:
 			cfg->fc_priority = nla_get_u32(attr);
 			break;

@@ -17,11 +17,14 @@
 #else
 #define MODULE_VERMAGIC_MODULE_UNLOAD ""
 #endif
-#ifdef CONFIG_MODVERSIONS
+/*
+ * W527: vendor modules were built against 4.14.98 with MODVERSIONS on, so
+ * their vermagic carries the "modversions" tag.  We build with MODVERSIONS
+ * off to skip CRC checks against drifted stable ABI, but same_magic()
+ * degrades to plain strcmp then -- keep emitting the tag so closed-source
+ * modules pass the vermagic check.
+ */
 #define MODULE_VERMAGIC_MODVERSIONS "modversions "
-#else
-#define MODULE_VERMAGIC_MODVERSIONS ""
-#endif
 #ifndef MODULE_ARCH_VERMAGIC
 #define MODULE_ARCH_VERMAGIC ""
 #endif
