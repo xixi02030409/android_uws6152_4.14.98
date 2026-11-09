@@ -79,7 +79,7 @@ struct completion gnss_dump_complete;
 #endif
 static unsigned int gnssver = 0x22;
 static const struct of_device_id gnss_common_ctl_of_match[] = {
-	{.compatible = "sprd,gnss_common_ctl", .data = (void *)&gnssver},
+	{.compatible = "sprd,gnss-common-ctl", .data = (void *)&gnssver},
 	{},
 };
 

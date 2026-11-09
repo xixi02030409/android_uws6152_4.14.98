@@ -1,0 +1,12 @@
+menuconfig INPUT_FINGERPRINT
+	bool "Fingerprint support"
+	depends on INPUT
+	default y
+	help
+	  Microarray SPI fingerprint (factory-spec port, r39).
+
+if INPUT_FINGERPRINT
+config MICROARRAY_FINGERPRINT
+	bool "Microarray mas fingerprint (W527)"
+	default y
+endif

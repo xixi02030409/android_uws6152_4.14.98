@@ -2799,6 +2799,8 @@ static int  marlin_remove(struct platform_device *pdev)
 
 static void marlin_shutdown(struct platform_device *pdev)
 {
+	if (!marlin_dev)
+		return;
 	if (marlin_dev->power_state != 0) {
 		WARN_ON_ONCE("marlin some subsys power is on");
 		sprdwcn_bus_set_carddump_status(true);
