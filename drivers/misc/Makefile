@@ -82,3 +82,4 @@ $(obj)/lkdtm_rodata_objcopy.o: $(obj)/lkdtm_rodata.o FORCE
 	$(call if_changed,objcopy)
 obj-$(CONFIG_BD1860) += bd1860/
 obj-$(CONFIG_HXD019_IR) += hxd019/
+obj-y				+= sprd_map/
