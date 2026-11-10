@@ -32,14 +32,16 @@ static struct sdio_chn_info_t *sdio_chn_info;
 static void sdio_channel_to_hwtype(int inout, int channel,
 	unsigned int *type, unsigned int *subtype)
 {
-	if (inout) {
-		*type = channel / 4;
-		*subtype = channel % 4;
-	} else {
-		channel -= SDIO_CHN_TX_NUM;
-		*type = channel / 4;
-		*subtype = channel % 4;
-	}
+	/*
+	 * factory BSP wire format (disasm-proven): type is always 0;
+	 * subtype = channel (TX) / channel - 12 (RX).
+	 * The ZDC tree's ch/4,%4 scheme is incompatible with the CP2 firmware.
+	 */
+	*type = 0;
+	if (inout)
+		*subtype = channel;
+	else
+		*subtype = channel - 12;
 
 	sdiom_print("%s type:%d, subtype:%d\n", __func__, *type, *subtype);
 }
@@ -49,10 +51,11 @@ static int sdio_hwtype_to_channel(int inout, unsigned int type,
 {
 	int channel = -1;
 
+	/* factory BSP inverse: TX = subtype, RX = subtype + 12 */
 	if (inout)
-		channel = type * 4 + subtype;
+		channel = subtype;
 	else
-		channel = type * 4 + subtype + SDIO_CHN_TX_NUM;
+		channel = subtype + 12;
 
 	sdiom_print("%s channel:%d\n", __func__, channel);
 
