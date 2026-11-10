@@ -29,6 +29,7 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
+#include <linux/of_address.h>
 #include <linux/of_platform.h>
 #include <linux/regmap.h>
 #include <linux/mfd/syscon.h>
@@ -174,6 +175,80 @@ static void audit_one_group(struct device *dev, struct audit_entry *e)
 	printk("###--END\n");
 }
 
+
+/* ---- v2: runtime syscon scanner (no DT changes needed) ---- */
+
+#define MAX_MAPS 16
+struct syscon_map {
+	struct regmap		*map;
+	char			name[40];
+};
+static struct syscon_map syscon_maps[MAX_MAPS];
+static int nsyscon_maps;
+
+static void scan_syscon_maps(void)
+{
+	struct device_node *np;
+
+	if (nsyscon_maps)
+		return;
+	for_each_compatible_node(np, NULL, "syscon") {
+		struct regmap *m = syscon_node_to_regmap(np);
+
+		if (IS_ERR(m))
+			continue;
+		if (nsyscon_maps >= MAX_MAPS)
+			break;
+		syscon_maps[nsyscon_maps].map = m;
+		strlcpy(syscon_maps[nsyscon_maps].name,
+			np->name, sizeof(syscon_maps[nsyscon_maps].name));
+		printk("  ##--syscon[%d] %s\n", nsyscon_maps,
+			syscon_maps[nsyscon_maps].name);
+		nsyscon_maps++;
+	}
+	if (!nsyscon_maps)
+		printk(KERN_ERR "  ##--no syscon maps found\n");
+}
+
+static ssize_t audit_raw_store(struct device *dev,
+			       struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	int idx;
+	unsigned long addr = 0;
+	unsigned int val = 0;
+
+	if (sscanf(buf, "%d %lx", &idx, &addr) != 2)
+		return -EINVAL;
+	scan_syscon_maps();
+	if (idx < 0 || idx >= nsyscon_maps) {
+		printk("  ##--map index %d out of range\n", idx);
+		return -EINVAL;
+	}
+	if (regmap_read(syscon_maps[idx].map, addr, &val)) {
+		printk("  ##--Read %s(0x%08x) error\n",
+			syscon_maps[idx].name, (u32)addr);
+		return -EIO;
+	}
+	printk("  ##--%s(0x%08x): 0x%08x\n",
+		syscon_maps[idx].name, (u32)addr, val);
+	return count;
+}
+static DEVICE_ATTR_WO(audit_raw);
+
+static ssize_t audit_maps_show(struct device *dev,
+			       struct device_attribute *attr, char *buf)
+{
+	int i, n = 0;
+
+	scan_syscon_maps();
+	for (i = 0; i < nsyscon_maps; i++)
+		n += scnprintf(buf + n, PAGE_SIZE - n, "[%d] %s\n",
+			       i, syscon_maps[i].name);
+	return n;
+}
+static DEVICE_ATTR_RO(audit_maps);
+
 /* ---- sysfs trigger ---- */
 
 static ssize_t audit_run_store(struct device *dev,
@@ -204,10 +279,9 @@ static int sprd_debuglog_probe(struct platform_device *pdev)
 
 	printk(fstr_init, DRV_NAME);
 
-	if (!np) {
+	/* v2: DT node optional — runtime syscon scanner covers the audit need */
+	if (!np)
 		printk(fstr_nodev, DRV_NAME);
-		return -EINVAL;
-	}
 
 	/* factory parity: SIP handle check (ATF channel alive) */
 	{
@@ -219,11 +293,7 @@ static int sprd_debuglog_probe(struct platform_device *pdev)
 		/* warn only: probe continues, SIP is optional for audit */
 	}
 
-	na = of_get_child_count(np);
-	if (na <= 0) {
-		printk(fstr_nomd);
-		return -EINVAL;
-	}
+	na = np ? of_get_child_count(np) : 0;
 
 	p = devm_kmalloc(dev, sizeof(*p), GFP_KERNEL);
 	if (!p) {
@@ -277,6 +347,8 @@ static int sprd_debuglog_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, p);
 
 	ret = device_create_file(dev, &dev_attr_audit_run);
+	ret |= device_create_file(dev, &dev_attr_audit_raw);
+	ret |= device_create_file(dev, &dev_attr_audit_maps);
 	if (ret) {
 		dev_err(dev, fstr_regerr);
 		return ret;
@@ -293,8 +365,11 @@ static int sprd_debuglog_remove(struct platform_device *pdev)
 {
 	struct dbg_priv *p = platform_get_drvdata(pdev);
 
-	if (p && p->dev)
+	if (p && p->dev) {
 		device_remove_file(p->dev, &dev_attr_audit_run);
+		device_remove_file(p->dev, &dev_attr_audit_raw);
+		device_remove_file(p->dev, &dev_attr_audit_maps);
+	}
 	return 0;
 }
 
