@@ -244,17 +244,17 @@ struct sprdwcn_bus_ops {
 	 * For sdio:
 	 * list_alloc and list_free only tx available.
 	 * TX: module manage buf, RX: SDIO unified manage buf
-	 * (factory BSP order: list_alloc@0x28 before get_bus_status@0x30)
+	 * (factory BSP order proven from ko TX path: list_alloc@0x28, list_free@0x30, push_list@0x38)
 	 */
 	int (*list_alloc)(int chn, struct mbuf_t **head,
 			  struct mbuf_t **tail, int *num);
-	int (*get_bus_status)(void);
 	int (*list_free)(int chn, struct mbuf_t *head,
 			 struct mbuf_t *tail, int num);
 
 	/* For sdio: TX(send data) and RX(give back list to SDIO) */
 	int (*push_list)(int chn, struct mbuf_t *head,
 			 struct mbuf_t *tail, int num);
+	int (*get_bus_status)(void);
 	int (*push_list_direct)(int chn, struct mbuf_t *head,
 			 struct mbuf_t *tail, int num);
 
