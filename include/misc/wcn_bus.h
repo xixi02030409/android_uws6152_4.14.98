@@ -239,15 +239,16 @@ struct sprdwcn_bus_ops {
 	int (*chn_deinit)(struct mchn_ops_t *ops);
 
 	enum wcn_hard_intf_type (*get_hwintf_type)(void);
-	int (*get_bus_status)(void);
 
 	/*
 	 * For sdio:
 	 * list_alloc and list_free only tx available.
 	 * TX: module manage buf, RX: SDIO unified manage buf
+	 * (factory BSP order: list_alloc@0x28 before get_bus_status@0x30)
 	 */
 	int (*list_alloc)(int chn, struct mbuf_t **head,
 			  struct mbuf_t **tail, int *num);
+	int (*get_bus_status)(void);
 	int (*list_free)(int chn, struct mbuf_t *head,
 			 struct mbuf_t *tail, int num);
 
