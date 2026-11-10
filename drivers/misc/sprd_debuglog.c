@@ -77,7 +77,7 @@ int wakeup_info_register(const char *owner, void *data)
 
 	w = kzalloc(sizeof(*w), GFP_KERNEL);
 	if (!w) {
-		pr_err(KTAG ": %s: wakeup info memory alloc error\n", owner ?: "?");
+		printk(KTAG ": %s: wakeup info memory alloc error\n", owner ?: "?");
 		return -ENOMEM;
 	}
 	w->owner = owner;
@@ -140,14 +140,14 @@ static void audit_one_group(struct device *dev, struct audit_entry *e)
 	struct reg_ent *re;
 	int i;
 
-	pr_info("###--%s\n", e->name);
+	printk("###--%s\n", e->name);
 
 	if (!e->map) {
-		pr_err("  ##--%s: no regmap\n", e->name);
+		printk("  ##--%s: no regmap\n", e->name);
 		return;
 	}
 	if (e->nregs < 4) {
-		pr_err("   #--Bit list is empty\n");
+		printk("   #--Bit list is empty\n");
 		return;
 	}
 
@@ -157,21 +157,21 @@ static void audit_one_group(struct device *dev, struct audit_entry *e)
 		int ret = regmap_read(e->map, re->addr, &val);
 
 		if (ret) {
-			pr_err("  ##--Read %s.reg%d(0x%08x) error\n",
+			printk("  ##--Read %s.reg%d(0x%08x) error\n",
 			       e->name, i, re->addr);
 			continue;
 		}
-		pr_info("  ##--%s.reg%d: 0x%08x\n", e->name, i, val);
+		printk("  ##--%s.reg%d: 0x%08x\n", e->name, i, val);
 		if (re->expect != 0xffffffffU) {
 			u32 got = (val >> re->shift) & re->mask;
 			u32 want = (re->expect >> re->shift) & re->mask;
 
 			if (got != want)
-				pr_err("  ##--Register table is error (got 0x%x want 0x%x)\n",
+				printk("  ##--Register table is error (got 0x%x want 0x%x)\n",
 				       got, want);
 		}
 	}
-	pr_info("###--END\n");
+	printk("###--END\n");
 }
 
 /* ---- sysfs trigger ---- */
@@ -202,10 +202,10 @@ static int sprd_debuglog_probe(struct platform_device *pdev)
 	int na, i = 0;
 	int ret;
 
-	pr_info(fstr_init, DRV_NAME);
+	printk(fstr_init, DRV_NAME);
 
 	if (!np) {
-		pr_err(fstr_nodev, DRV_NAME);
+		printk(fstr_nodev, DRV_NAME);
 		return -EINVAL;
 	}
 
@@ -215,13 +215,13 @@ static int sprd_debuglog_probe(struct platform_device *pdev)
 						"sprd,sip-syscon");
 
 		if (IS_ERR(sipmap))
-			pr_warn(fstr_nosip);
+			printk(fstr_nosip);
 		/* warn only: probe continues, SIP is optional for audit */
 	}
 
 	na = of_get_child_count(np);
 	if (na <= 0) {
-		pr_err(fstr_nomd);
+		printk(fstr_nomd);
 		return -EINVAL;
 	}
 
