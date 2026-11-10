@@ -551,3 +551,11 @@ config HXD019_IR
 	depends on I2C
 	default y
 
+
+config SPRD_DEBUGLOG
+	tristate "UNISOC AP sleep/wakeup audit probe (r57-rebuild)"
+	default y
+	help
+	  Semantic rewrite of factory debug_driver: DT-configured audit table,
+	  syscon regmap reads, prints which register domain blocks deep sleep.
+	  Trigger via /sys/.../audit_run or boot-time auto run.
