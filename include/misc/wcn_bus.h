@@ -182,10 +182,10 @@ union wcn_chn_config {
 #endif
 
 struct mchn_ops_t {
+	/* channel index for wf/bt/fm  (factory BSP field order: channel@0, hif_type@4) */
+	int channel;
 	/* hardware interface type */
 	enum wcn_hard_intf_type hif_type;
-	/* channel index for wf/bt/fm */
-	int channel;
 	/* channel config paras */
 #ifdef CONFIG_WCN_SIPC
 	union wcn_chn_config chn_config;
