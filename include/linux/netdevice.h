@@ -1772,6 +1772,7 @@ struct net_device {
 #endif
 	void 			*atalk_ptr;
 	struct in_device __rcu	*ip_ptr;
+	void __rcu		*dn_ptr;   /* factory BSP ABI: DECNET dn_ptr slot removed by 336patch; keep offset parity with vendor kos */
 	struct inet6_dev __rcu	*ip6_ptr;
 	void			*ax25_ptr;
 	struct wireless_dev	*ieee80211_ptr;
