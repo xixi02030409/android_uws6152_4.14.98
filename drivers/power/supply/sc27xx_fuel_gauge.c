@@ -72,6 +72,7 @@
 #define SC27XX_FGU_TEMP_BUFF_CNT	10
 
 #define SC27XX_FGU_LOW_VBAT_REGION	3300
+#define SC27XX_FGU_LOW_TEMP_REGION	100	/* 0.1C units: 10.0C */
 
 #define interpolate(x, x1, y1, x2, y2) \
 	((y1) + ((((y2) - (y1)) * ((x) - (x1))) / ((x2) - (x1))));
