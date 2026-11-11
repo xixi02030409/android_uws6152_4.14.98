@@ -1149,8 +1149,6 @@ static int cfg80211_netdev_notifier_call(struct notifier_block *nb,
 		SET_NETDEV_DEVTYPE(dev, &wiphy_type);
 		break;
 	case NETDEV_REGISTER:
-		printk("\n");
-	}
 		/*
 		 * NB: cannot take rdev->mtx here because this may be
 		 * called within code protected by it when interfaces
