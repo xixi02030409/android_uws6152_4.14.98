@@ -1185,10 +1185,13 @@ static int cfg80211_netdev_notifier_call(struct notifier_block *nb,
 		wdev->wext.connect.auth_type = NL80211_AUTHTYPE_AUTOMATIC;
 #endif
 
-		if (wdev->wiphy->flags & WIPHY_FLAG_PS_ON_BY_DEFAULT)
-			wdev->ps = true;
-		else
-			wdev->ps = false;
+		/*
+		 * W527: vendor CP2 firmware power-save wake chain is broken on
+		 * r57 (FW_PWR_UP never comes back after POWER_SAVE cmd; QoS
+		 * unicast TX starves with fw_awake=0). Default PS off until the
+		 * wake chain is root-caused. Symptom was 100% unicast TX loss.
+		 */
+		wdev->ps = false;
 		/* allow mac80211 to determine the timeout */
 		wdev->ps_timeout = -1;
 
