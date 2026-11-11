@@ -65,10 +65,13 @@
 #define SC27XX_FGU_FIRST_POWERTON	GENMASK(3, 0)
 #define SC27XX_FGU_DEFAULT_CAP		GENMASK(11, 0)
 #define SC27XX_FGU_NORMAIL_POWERTON	0x5
+#define SC27XX_FGU_POCV_VOLT_THRESHOLD	3400
 
 #define SC27XX_FGU_CUR_BASIC_ADC	8192
 #define SC27XX_FGU_SAMPLE_HZ		2
 #define SC27XX_FGU_TEMP_BUFF_CNT	10
+
+#define SC27XX_FGU_LOW_VBAT_REGION	3300
 
 #define interpolate(x, x1, y1, x2, y2) \
 	((y1) + ((((y2) - (y1)) * ((x) - (x1))) / ((x2) - (x1))));
@@ -123,6 +126,9 @@ struct sc27xx_fgu_data {
 	int calib_resist_real;
 	int calib_resist_spec;
 	int comp_resistance;
+	int first_calib_volt;
+	int first_calib_cap;
+	int bat_temp;
 	int index;
 	int temp_buff[SC27XX_FGU_TEMP_BUFF_CNT];
 	struct power_supply_battery_ocv_table *cap_table;
@@ -152,9 +158,14 @@ static const struct sc27xx_fgu_variant_data sc2720_info = {
 };
 
 static int sc27xx_fgu_cap_to_clbcnt(struct sc27xx_fgu_data *data, int capacity);
+static void sc27xx_fgu_low_capacity_match_ocv(struct sc27xx_fgu_data *data,
+					      int cap);
 static void sc27xx_fgu_low_capacity_calibration(struct sc27xx_fgu_data *data,
-						int cap, int int_mode);
+						int cap, int int_mode,
+						int chg_sts);
 static int sc27xx_fgu_get_temp(struct sc27xx_fgu_data *data, int *temp);
+static int sc27xx_fgu_get_status(struct sc27xx_fgu_data *data, int *status);
+static int sc27xx_fgu_get_vbat_ocv(struct sc27xx_fgu_data *data, int *val);
 static void sc27xx_fgu_adjust_cap(struct sc27xx_fgu_data *data, int cap);
 
 static const char * const sc27xx_charger_supply_name[] = {
@@ -397,6 +408,22 @@ static int sc27xx_fgu_get_boot_capacity(struct sc27xx_fgu_data *data, int *cap)
 		return ret;
 
 	volt = sc27xx_fgu_adc_to_voltage(data, volt);
+
+	/* W527-r57: BSP/factory get_boot_voltage form - POCV register is a
+	 * loaded sample; below 3.4V fall back to the OCV register (factory
+	 * disassembly: cmp #3399 / b.gt branch @0x6a58). */
+	if (volt < SC27XX_FGU_POCV_VOLT_THRESHOLD) {
+		int ocv_tmp;
+
+		ret = sc27xx_fgu_get_vbat_ocv(data, &ocv_tmp);
+		if (ret) {
+			dev_err(data->dev, "Failed to read volt, ret = %d\n",
+				ret);
+			return ret;
+		}
+		volt = ocv_tmp / 1000;
+	}
+
 	ocv = volt * 1000 - oci * data->internal_resist;
 
 	/*
@@ -510,7 +537,15 @@ static int sc27xx_fgu_get_capacity(struct sc27xx_fgu_data *data, int *cap)
 			*cap = 100;
 	}
 
-	sc27xx_fgu_low_capacity_calibration(data, *cap, false);
+	/* W527-r57: BSP/factory calibration form (match_ocv). Charger status
+	 * read locally; on failure skip calibration, still return cap. */
+	{
+		int chg_sts;
+
+		if (sc27xx_fgu_get_status(data, &chg_sts) == 0)
+			sc27xx_fgu_low_capacity_calibration(data, *cap, false,
+							    chg_sts);
+	}
 
 	return 0;
 }
@@ -661,6 +696,7 @@ static int sc27xx_fgu_get_temp(struct sc27xx_fgu_data *data, int *temp)
 	if (vol > 1750 || vol < 50) {
 		*temp = 250;
 		*temp = sc27xx_fgu_get_average_temp(data, *temp);
+		data->bat_temp = *temp;
 		return 0;
 	}
 
@@ -694,6 +730,7 @@ static int sc27xx_fgu_get_temp(struct sc27xx_fgu_data *data, int *temp)
 	*temp = sc27xx_fgu_vol_to_temp(data->temp_table,
 				       data->temp_table_len, vol * 1000);
 	*temp = sc27xx_fgu_get_average_temp(data, *temp);
+	data->bat_temp = *temp;
 
 	return 0;
 }
@@ -944,10 +981,17 @@ static void sc27xx_fgu_adjust_cap(struct sc27xx_fgu_data *data, int cap)
 		dev_err(data->dev, "failed to get init clbcnt\n");
 }
 
-static void sc27xx_fgu_low_capacity_calibration(struct sc27xx_fgu_data *data,
-						int cap, int int_mode)
+/*
+ * W527-r57: match_ocv = factory-verified low-capacity calibration
+ * (UNISOC BSP form, disassembly-verified branch-by-branch against
+ * factory kernel @0xffffff8008626bd4: init_cap-=5 / adjust(alarm_cap)
+ * / adjust(0) / first_calib four-level chain).  Units: ocv=uV
+ * (get_vbat_ocv), batt_uV=mV (get_vbat_vol, 3300 = LOW_VBAT_REGION).
+ */
+static void sc27xx_fgu_low_capacity_match_ocv(struct sc27xx_fgu_data *data,
+					      int cap)
 {
-	int ret, ocv, chg_sts, adc;
+	int ret, ocv, batt_uV;
 
 	ret = sc27xx_fgu_get_vbat_ocv(data, &ocv);
 	if (ret) {
@@ -955,53 +999,55 @@ static void sc27xx_fgu_low_capacity_calibration(struct sc27xx_fgu_data *data,
 		return;
 	}
 
-	ret = sc27xx_fgu_get_status(data, &chg_sts);
+	ret = sc27xx_fgu_get_vbat_vol(data, &batt_uV);
 	if (ret) {
-		dev_err(data->dev, "get charger status error.\n");
+		dev_err(data->dev, "get battery vol error.\n");
+		return;
+	}
+
+	/* BSP/factory step is 5 on a 0-1000 permille scale (=0.5%); this tree
+	 * reports 0-100 centesimal, so the closest smooth step is 1. */
+	if ((batt_uV < SC27XX_FGU_LOW_VBAT_REGION || ocv < data->min_volt) &&
+	    cap > data->alarm_cap) {
+		data->init_cap -= 1;
+		if (data->init_cap < 0)
+			data->init_cap = 0;
+	} else if (ocv > data->min_volt && cap <= data->alarm_cap) {
+		sc27xx_fgu_adjust_cap(data, data->alarm_cap);
+	} else if (ocv <= data->cap_table[data->table_len - 1].ocv) {
+		sc27xx_fgu_adjust_cap(data, 0);
+	} else if (data->first_calib_volt > 0 && data->first_calib_cap > 0 &&
+		   ocv <= data->first_calib_volt && cap > data->first_calib_cap) {
+		data->init_cap -= 1;
+		if (data->init_cap < 0)
+			data->init_cap = 0;
+	}
+}
+
+static void sc27xx_fgu_low_capacity_calibration(struct sc27xx_fgu_data *data,
+						int cap, int int_mode,
+						int chg_sts)
+{
+	int ret, ocv, adc;
+
+	ret = sc27xx_fgu_get_vbat_ocv(data, &ocv);
+	if (ret) {
+		dev_err(data->dev, "get battery ocv error.\n");
 		return;
 	}
 
 	/*
-	 * If we are in charging mode, then we do not need to calibrate the
+	 * If we are in charging mode or the battery temperature is
+	 * 10 degrees or less, then we do not need to calibrate the
 	 * lower capacity.
 	 */
-	if (chg_sts == POWER_SUPPLY_STATUS_CHARGING)
+	if (chg_sts == POWER_SUPPLY_STATUS_CHARGING ||
+	    data->bat_temp <= SC27XX_FGU_LOW_TEMP_REGION)
 		return;
 
-	if ((ocv > data->cap_table[0].ocv && cap < 100) ||
-	    cap > 100) {
-		sc27xx_fgu_adjust_cap(data, 100);
-	} else if (ocv <= data->cap_table[data->table_len - 1].ocv) {
-		sc27xx_fgu_adjust_cap(data, 0);
-	} else if ((ocv > data->cap_table[data->table_len - 1].ocv && cap <= 0) ||
-		(ocv > data->min_volt && cap <= data->alarm_cap)) {
-		int cur_cap = power_supply_ocv2cap_simple(data->cap_table,
-							  data->table_len, ocv);
+	sc27xx_fgu_low_capacity_match_ocv(data, cap);
 
-		sc27xx_fgu_adjust_cap(data, cur_cap);
-	} else if (ocv <= data->min_volt) {
-		/*
-		 * If current OCV value is less than the low alarm voltage, but
-		 * current capacity is larger than the alarm capacity, we should
-		 * adjust the inititial capacity to alarm capacity.
-		 */
-		if (cap > data->alarm_cap) {
-			sc27xx_fgu_adjust_cap(data, data->alarm_cap);
-		} else {
-			int cur_cap;
-
-			/*
-			 * If current capacity is equal with 0 or less than 0
-			 * (some error occurs), we should adjust inititial
-			 * capacity to the capacity corresponding to current OCV
-			 * value.
-			 */
-			cur_cap = power_supply_ocv2cap_simple(data->cap_table,
-							      data->table_len,
-							      ocv);
-			sc27xx_fgu_adjust_cap(data, cur_cap);
-		}
-
+	if (ocv <= data->min_volt) {
 		if (!int_mode)
 			return;
 
@@ -1050,7 +1096,14 @@ static irqreturn_t sc27xx_fgu_interrupt(int irq, void *dev_id)
 	if (ret)
 		goto out;
 
-	sc27xx_fgu_low_capacity_calibration(data, cap, true);
+	/* W527-r57: BSP form - status passed into 4-arg calibration. */
+	{
+		int chg_sts;
+
+		if (sc27xx_fgu_get_status(data, &chg_sts) == 0)
+			sc27xx_fgu_low_capacity_calibration(data, cap, true,
+							    chg_sts);
+	}
 
 out:
 	mutex_unlock(&data->lock);
@@ -1385,6 +1438,19 @@ static int sc27xx_fgu_probe(struct platform_device *pdev)
 				       &data->comp_resistance);
 	if (ret)
 		dev_warn(&pdev->dev, "no fgu compensated resistance support\n");
+
+	/* W527-r57: optional first-calibration marks for low_capacity_match_ocv
+	 * (BSP "first-calib-voltage"/"first-calib-capacity"). Absent in W527
+	 * DTB -> stays 0 -> match_ocv fourth branch safely never fires. */
+	ret = device_property_read_u32(&pdev->dev, "first-calib-voltage",
+				       &data->first_calib_volt);
+	if (ret)
+		dev_warn(&pdev->dev, "no fgu first calibration voltage\n");
+
+	ret = device_property_read_u32(&pdev->dev, "first-calib-capacity",
+				       &data->first_calib_cap);
+	if (ret)
+		dev_warn(&pdev->dev, "no fgu first calibration capacity\n");
 
 	data->channel = devm_iio_channel_get(&pdev->dev, "bat-temp");
 	if (IS_ERR(data->channel)) {
