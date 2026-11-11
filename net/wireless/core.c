@@ -1149,15 +1149,6 @@ static int cfg80211_netdev_notifier_call(struct notifier_block *nb,
 		SET_NETDEV_DEVTYPE(dev, &wiphy_type);
 		break;
 	case NETDEV_REGISTER:
-	{
-		/* r57dbg: dump raw wdev head to learn vendor ko's field layout */
-		int di;
-		u64 dv;
-		printk(KERN_CRIT "r57dbg wdev=%px iftype=%d netdev=%px raw:", wdev, wdev->iftype, wdev->netdev);
-		for (di = 0; di < 0x30; di += 8) {
-			memcpy(&dv, (char *)wdev + di, 8);
-			printk(" [%02x]=%016llx", di, dv);
-		}
 		printk("\n");
 	}
 		/*

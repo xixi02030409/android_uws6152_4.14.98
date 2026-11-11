@@ -1120,6 +1120,7 @@ MODULE_DEVICE_TABLE(i2c, mir3da_id);
 static const unsigned short normal_i2c[] = { 0x27,  0x26,I2C_CLIENT_END };
 static const struct of_device_id mir3da_of_match[] = {
        { .compatible = "da,da213", },
+       { .compatible = "da,da217", },
         {}
 };
 
