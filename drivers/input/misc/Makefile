@@ -87,3 +87,4 @@ obj-$(CONFIG_INPUT_YEALINK)		+= yealink.o
 obj-$(CONFIG_INPUT_IDEAPAD_SLIDEBAR)	+= ideapad_slidebar.o
 obj-$(CONFIG_SENSORS_QMC6308) += qmc6308/
 obj-$(CONFIG_SENSORS_MIR3DA) += mir3da/
+obj-$(CONFIG_INPUT_AS1509)	+= as1509_i2c.o
