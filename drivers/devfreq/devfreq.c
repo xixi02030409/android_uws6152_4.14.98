@@ -261,6 +261,27 @@ int update_devfreq(struct devfreq *devfreq)
 		flags |= DEVFREQ_FLAG_LEAST_UPPER_BOUND; /* Use LUB */
 	}
 
+	/*
+	 * W527-r40 anti-jank: the vendor pvrsrvkm GPU driver registers its
+	 * devfreq device with simple_ondemand but its load reporting never
+	 * ramps (trans_stat: one drop to the lowest OPP right after boot,
+	 * zero transitions afterwards), so the GPU is stuck at 384MHz -
+	 * half of its 800MHz top OPP - and the whole UI janks. Force the
+	 * target frequency up to the top OPP of the GPU device on every
+	 * update, regardless of governor choice or sysfs min/max limits.
+	 */
+	if (devfreq->profile->freq_table && devfreq->profile->max_state > 0 &&
+	    !strncmp(dev_name(&devfreq->dev), "60000000.gpu", 12)) {
+		unsigned int w527_i;
+		unsigned long w527_top = 0;
+
+		for (w527_i = 0; w527_i < devfreq->profile->max_state; w527_i++)
+			if (devfreq->profile->freq_table[w527_i] > w527_top)
+				w527_top = devfreq->profile->freq_table[w527_i];
+		if (freq && freq < w527_top)
+			freq = w527_top;
+	}
+
 	if (devfreq->profile->get_cur_freq)
 		devfreq->profile->get_cur_freq(devfreq->dev.parent, &cur_freq);
 	else
