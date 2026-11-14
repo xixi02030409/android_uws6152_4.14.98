@@ -1143,15 +1143,6 @@ rdev_start_radar_detection(struct cfg80211_registered_device *rdev,
 	return ret;
 }
 
-static inline void
-rdev_end_cac(struct cfg80211_registered_device *rdev,
-	     struct net_device *dev)
-{
-	/* r34: end_cac op dropped to match vendor ko layout (no DFS CAC on fullmac) */
-	trace_rdev_end_cac(&rdev->wiphy, dev);
-	trace_rdev_return_void(&rdev->wiphy);
-}
-
 static inline int
 rdev_set_mcast_rate(struct cfg80211_registered_device *rdev,
 		    struct net_device *dev,
