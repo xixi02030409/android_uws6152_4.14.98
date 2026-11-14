@@ -3657,8 +3657,12 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	long err;
 	char *after_dashes;
 
-    flags |= MODULE_INIT_IGNORE_MODVERSIONS;
-	flags |= MODULE_INIT_IGNORE_VERMAGIC;
+	/* W527 rebuild: vendor ko vermagic is "4.14.98 SMP preempt mod_unload
+	 * modversions aarch64" (verified on all 14 modules). ZDC forced
+	 * IGNORE_VERMAGIC/IGNORE_MODVERSIONS here, which made "ko loads" a
+	 * meaningless signal and let ABI drift freeze the kernel silently.
+	 * Enforce it again so a mismatch fails loudly instead.
+	 */
 
 	err = module_sig_check(info, flags);
 	if (err)
