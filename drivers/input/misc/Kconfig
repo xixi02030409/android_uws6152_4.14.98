@@ -894,3 +894,11 @@ config INPUT_SC27XX_VIBRA
 endif
 source "drivers/input/misc/qmc6308/Kconfig"
 source "drivers/input/misc/mir3da/Kconfig"
+
+config INPUT_AS1509
+	tristate "AS1509 magnetic rotary encoder (W527 crown)"
+	depends on I2C && INPUT
+	default y
+	help
+	  AS1509 crown rotary encoder. Reverse-engineered from factory ROM
+	  (as1509_reverse_spec.md); register map and key codes are factory-verified.
