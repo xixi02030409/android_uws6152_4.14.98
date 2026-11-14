@@ -82,3 +82,4 @@ targets += lkdtm_rodata.o lkdtm_rodata_objcopy.o
 $(obj)/lkdtm_rodata_objcopy.o: $(obj)/lkdtm_rodata.o FORCE
 	$(call if_changed,objcopy)
 obj-y				+= sprd_map/
+obj-$(CONFIG_BD1860)		+= bd1860/
