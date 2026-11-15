@@ -49,7 +49,7 @@ int log_rx_callback(void *addr, unsigned int len)
 		logfile_init();
 	log_start_flags = 1;
 
-	if (IS_ERR(log_file)) {
+	if (!log_file || IS_ERR(log_file)) {
 		return -1;
 	}
 
@@ -80,7 +80,12 @@ int dumpmem_rx_callback(void *addr, unsigned int len)
 	ssize_t ret;
 
 	WCN_INFO("%s\n", __func__);
-	if (IS_ERR(dump_file))
+	/* W527 fix: static dump_file starts as NULL and IS_ERR(NULL) is
+	 * false, so the first CP dumpmem callback before wcn_dbg_thread
+	 * opened the file dereferenced NULL in kernel_write -> boot Oops
+	 * at 27s (pstore: "Unable to handle kernel NULL pointer dereference
+	 * at virtual address 00000044").  Guard both states. */
+	if (!dump_file || IS_ERR(dump_file))
 		return -1;
 	ret = kernel_write(dump_file, addr, len, &mem_pos);
 	if (ret != len) {
