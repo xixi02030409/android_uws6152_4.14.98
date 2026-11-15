@@ -639,6 +639,25 @@ static int bd_probe(struct i2c_client *cli, const struct i2c_device_id *id)
 	BD_heartbp_init();
 	bd1860_power_init(bds);
 
+	/* S6k: 开机自动开启测量（诊断期常开）——绕过 HAL 的 hrenable 写链。
+	 * 该写链实测未到达驱动（S6j code8 无事件，见干净记忆 v38/v39），
+	 * 先让采集循环跑起来，诊断轴直接出数；定性后撤。 */
+	{
+		int ret = bd44_init(6);
+
+		pr_info("bd1860: S6k auto-init ret=%d\n", ret);
+		if (!ret) {
+			bds->mode = 6;
+			bds->enabled = 1;
+			complete(&bds->comp);
+		}
+		if (bds->input) {
+			input_report_abs(bds->input, 8,
+					 ret < 0 ? 200 : 50);
+			input_sync(bds->input);	/* 50=probe 内成功/200+|ret|=失败 */
+		}
+	}
+
 	/* S8: factory data->test_kinds = 0x32 after power_init */
 	bds->mode = 0x32;
 	test_kinds = 0x32;
