@@ -56,6 +56,7 @@
 #define AS1509_GETDATA_LEN	10	/* factory GetData(buf,10) */
 #define AS1509_GETDATA_REG	0x11	/* 起点：XYZ(6)+未知(2)+角度(2) */
 #define AS1509_TH_WINDOW	100	/* 阈值窗口半宽（value±100） */
+#define AS1509_POLL_MS		50	/* 常驻轮询周期（20Hz） */
 
 /* keycode 索引与 factory 参考点语义一致：0=up 1=down 2=front 3=back */
 enum as1509_pos { AS_POS_UP = 0, AS_POS_DOWN, AS_POS_FRONT, AS_POS_BACK, AS_POS_N };
@@ -65,6 +66,7 @@ struct as1509_data {
 	struct input_dev	*input;
 	struct wakeup_source	*ws;
 	struct work_struct	irq_work;
+	struct delayed_work	poll_dwork;	/* W527: 常驻轮询（工厂 as1509-work-queue 架构） */
 	struct mutex		lock;		/* i2c 访问与阈值重设串行化 */
 	int			irq;
 	bool			irq_armed;	/* 防重入（factory data+0xac） */
@@ -271,15 +273,12 @@ static void as1509_report(struct as1509_data *d, int pos)
 
 /* ---------------- IRQ 工作体（factory as1509_irq_work 逐条还原） */
 
-static void as1509_irq_work_fn(struct work_struct *work)
+static void as1509_do_work(struct as1509_data *d)
 {
-	struct as1509_data *d = container_of(work, struct as1509_data, irq_work);
 	u8 buf[AS1509_GETDATA_LEN];
 	int try, err, cnt, pos;
 	s16 x, y, z;
 	u16 angle;
-
-	__pm_stay_awake(d->ws);
 
 	/* GetData 最多 3 次重试（factory 语义，失败间隔 1-2ms） */
 	for (try = 0; try < 3; try++) {
@@ -290,7 +289,7 @@ static void as1509_irq_work_fn(struct work_struct *work)
 	}
 	if (err != AS1509_GETDATA_LEN) {
 		dev_err(&d->client->dev, "get_data fail %d after 3 tries\n", err);
-		goto out_rearm;
+		return;
 	}
 
 	/* 首帧限频 dump：真机核对 XYZ/角度字节语义 */
@@ -332,7 +331,14 @@ static void as1509_irq_work_fn(struct work_struct *work)
 		atomic_inc(&d->irq_cnt);
 	}
 
-out_rearm:
+}
+
+static void as1509_irq_work_fn(struct work_struct *work)
+{
+	struct as1509_data *d = container_of(work, struct as1509_data, irq_work);
+
+	__pm_stay_awake(d->ws);
+	as1509_do_work(d);
 	enable_irq(d->irq);
 	d->irq_armed = true;
 	__pm_relax(d->ws);
@@ -382,12 +388,10 @@ static ssize_t as1509_store(struct device *dev, struct device_attribute *attr,
 	if (buf[0] == '1' || buf[0] == 1) {
 		d->poll_on = true;
 		d->enabled = true;
-		if (d->wq)
-			queue_work(d->wq, &d->poll_work);
-		else
-			schedule_work(&d->irq_work);
+		queue_delayed_work(d->wq, &d->poll_dwork, 0);
 	} else {
 		d->poll_on = false;
+		cancel_delayed_work(&d->poll_dwork);
 	}
 	return count;
 }
@@ -434,12 +438,20 @@ static DEVICE_ATTR(och1970, 0664, as1509_show, as1509_store);
 static DEVICE_ATTR(enable, 0664, as1509_enable_show, as1509_enable_store);
 
 /* factory as1509_polling_work 的等价触发点：读一帧 + 位置判定（复用 irq_work） */
+static void as1509_do_work(struct as1509_data *d);
+
+/* W527: 常驻轮询 —— poll_on 时每 50ms 读一帧（工厂 as1509-work-queue 架构），
+ * 不依赖 EIC-async 的 IRQ 触发（该路径实测不出中断）。 */
 static void as1509_poll_work_fn(struct work_struct *work)
 {
 	struct as1509_data *d = container_of(work, struct as1509_data,
-					     poll_work);
+					     poll_dwork.work);
 
-	schedule_work(&d->irq_work);
+	if (!d->poll_on)
+		return;
+	as1509_do_work(d);
+	queue_delayed_work(d->wq, &d->poll_dwork,
+			   msecs_to_jiffies(AS1509_POLL_MS));
 }
 
 /* ---------------- Init（factory AS1509_Init 适配版） ---------------- */
@@ -625,7 +637,7 @@ static int as1509_probe(struct i2c_client *client,
 	 * -> ... -> device_create_file(och1970) + device_create_file(enable)
 	 * -> wakeup_source_register("as1509_wakelock") */
 	d->wq = alloc_workqueue("as1509-work-queue", WQ_UNBOUND, 1);
-	INIT_WORK(&d->poll_work, as1509_poll_work_fn);
+	INIT_DELAYED_WORK(&d->poll_dwork, as1509_poll_work_fn);
 
 	d->och1970_class = class_create(THIS_MODULE, "och1970");
 	if (IS_ERR(d->och1970_class)) {
