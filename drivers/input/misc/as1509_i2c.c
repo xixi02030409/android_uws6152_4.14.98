@@ -489,7 +489,43 @@ static int as1509_init(struct as1509_data *d)
 	err = as1509_set_aver_xy(d, 2);
 	if (err)
 		return err;
-	return as1509_set_odr(d, 0x70);
+	err = as1509_set_odr(d, 0x70);
+	if (err)
+		return err;
+
+	/*
+	 * W527 fix (2026-11-15): factory 的表冠 = 阈值中断 —— set_change_
+	 * Threshold(value±100)@0x28/0x2e/0x34 + SetInterruptAxis(axis,1)@0x21。
+	 * v1 在这里写 int_axis=0 关掉全部轴中断后再没人打开，IRQ 永远不来
+	 * （实测：as1509_irq 计数 0、gpio-431 恒 hi、och1970 恒 0 0 0）。
+	 * 现以当前一帧读数为窗口中心设三轴阈值并开三轴中断，
+	 * 与 irq_work 的"以最新读数重设阈值"闭环。
+	 */
+	{
+		u8 buf[AS1509_GETDATA_LEN];
+		s16 x = 0, y = 0, z = 0;
+
+		memset(buf, 0, sizeof(buf));
+		if (as1509_get_data(d, buf) == AS1509_GETDATA_LEN) {
+			x = (s16)(buf[0] | (buf[1] << 8));
+			y = (s16)(buf[2] | (buf[3] << 8));
+			z = (s16)(buf[4] | (buf[5] << 8));
+		}
+		mutex_lock(&d->lock);
+		err = as1509_set_threshold(d, 0, x);
+		if (!err)
+			err = as1509_set_threshold(d, 1, y);
+		if (!err)
+			err = as1509_set_threshold(d, 2, z);
+		mutex_unlock(&d->lock);
+		if (err)
+			dev_warn(dev, "crown threshold init fail: %d\n", err);
+		else
+			dev_info(dev,
+				 "crown armed: th center x=%d y=%d z=%d\n",
+				 x, y, z);
+	}
+	return 0;
 }
 
 /* ---------------- probe / remove ---------------- */
