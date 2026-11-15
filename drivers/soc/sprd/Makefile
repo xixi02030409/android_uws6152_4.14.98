@@ -11,3 +11,4 @@ obj-y				+= performance/
 obj-y				+= pub/
 obj-y				+= autotest/
 obj-$(CONFIG_SPRD_SYSTIMER)	+= sprd_systimer.o
+obj-$(CONFIG_SPRD_POWER)	+= power/
