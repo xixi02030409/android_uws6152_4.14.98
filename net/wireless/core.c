@@ -1185,10 +1185,16 @@ static int cfg80211_netdev_notifier_call(struct notifier_block *nb,
 		wdev->wext.connect.auth_type = NL80211_AUTHTYPE_AUTOMATIC;
 #endif
 
-		if (wdev->wiphy->flags & WIPHY_FLAG_PS_ON_BY_DEFAULT)
-			wdev->ps = true;
-		else
-			wdev->ps = false;
+		/*
+		 * W527: vendor CP2 firmware power-save wake chain is broken
+		 * (FW_PWR_UP never comes back after POWER_SAVE cmd; QoS
+		 * unicast TX starves with fw_awake=0).  2026-11-15 S5q live
+		 * evidence: fw assert WIFI_CMD_POWER_SAVE CMD_RSP_TIMEOUT
+		 * followed by WIFI_CMD_SCAN/RND_MAC timeout loop every ~10s.
+		 * Same defect as r57; default PS off until the wake chain is
+		 * root-caused.  (v15 fix, re-applied on rebuild branch.)
+		 */
+		wdev->ps = false;
 		/* allow mac80211 to determine the timeout */
 		wdev->ps_timeout = -1;
 
