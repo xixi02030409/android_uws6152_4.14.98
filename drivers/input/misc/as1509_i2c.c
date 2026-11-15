@@ -61,6 +61,13 @@
 #define AS1509_TH_WINDOW	100	/* 阈值窗口半宽（value±100） */
 #define AS1509_POLL_MS		50	/* 常驻轮询周期（20Hz） */
 
+/* S6i 增量旋转检测（2026-11-15 16:05 实测定标，S6h 诊断轴数据）：
+ * 静止噪声：相邻帧 delta < 30（10 分钟 8000 帧，xyz span 66/79/25）
+ * 转动跳变：相邻帧 delta 106~220（y 轴 4225->4008->4232 实拍）
+ * => 阈值 100 触发 / 30 迟滞回位 */
+#define AS_ROT_THRESH		100
+#define AS_ROT_HYST		30
+
 /* keycode 索引与 factory 参考点语义一致：0=up 1=down 2=front 3=back */
 enum as1509_pos { AS_POS_UP = 0, AS_POS_DOWN, AS_POS_FRONT, AS_POS_BACK, AS_POS_N };
 
@@ -88,6 +95,9 @@ struct as1509_data {
 	struct device		*och1970_dev;	/* factory device_create(..,"device") */
 	struct workqueue_struct	*wq;		/* factory "as1509-work-queue" */
 	struct work_struct	poll_work;	/* factory data+0xb0 polling_work */
+	/* ---- S6i: 增量旋转检测（不依赖出厂校准，见 AS_ROT_THRESH 注释） ---- */
+	bool			rot_armed;	/* 迟滞状态：true=允许触发 */
+	s16			rot_lx, rot_ly, rot_lz;	/* 上一帧 XYZ */
 };
 
 /* ---------------- 底层 i2c 原语 ---------------- */
@@ -326,6 +336,30 @@ static void as1509_do_work(struct as1509_data *d)
 	input_report_abs(d->input, ABS_Z, (u16)(y + 32768));
 	input_report_abs(d->input, ABS_RX, (u16)(z + 32768));
 	input_sync(d->input);
+
+	/* W527 S6i: 增量旋转检测 —— 不依赖出厂校准（factory ref 全 0 时
+	 * 本尊只报 up 一次，而本机无产测校准通道）。磁编码器转一格 = 磁场
+	 * 跳变，实拍相邻帧 delta 106~220（噪声 <30），阈值见 AS_ROT_THRESH。
+	 * 方向映射 y 降=up / y 升=down 为占位（首例实拍为 y 降后弹回），
+	 * 待 getevent 转动实测后校正；按压 front/back 键语义未验证，暂缺。 */
+	{
+		int dx = x - d->rot_lx, dy = y - d->rot_ly;
+		u32 delta = abs(dx) + abs(dy) + abs(z - d->rot_lz);
+
+		if (d->rot_armed && delta > AS_ROT_THRESH) {
+			int dir = (dy <= 0) ? AS_POS_UP : AS_POS_DOWN;
+
+			input_report_key(d->input, d->keycode[dir], 1);
+			input_report_key(d->input, d->keycode[dir], 0);
+			input_sync(d->input);
+			d->rot_armed = false;	/* 等磁场回稳（迟滞）再武装 */
+		} else if (!d->rot_armed && delta < AS_ROT_HYST) {
+			d->rot_armed = true;
+		}
+		d->rot_lx = x;
+		d->rot_ly = y;
+		d->rot_lz = z;
+	}
 
 	/* 以最新读数为窗口中心重设三轴阈值（factory 顺序） */
 	mutex_lock(&d->lock);
@@ -615,6 +649,8 @@ static int as1509_probe(struct i2c_client *client,
 	atomic_set(&d->irq_cnt, 0);
 	d->last_pos = -1;
 	d->irq_armed = true;
+	d->rot_armed = true;	/* S6i: 增量检测首帧 armed（首帧 last=0 可能
+				   假触发一次 key，开机后磁场回稳即正常） */
 
 	/* keycode：DTB 优先，缺省 = factory DTB 实证值 */
 	d->keycode[AS_POS_UP]    = 0x41;
