@@ -304,19 +304,21 @@ static int bd_poll_task(void *data)
 {
 	struct bd_state *s = data;
 	bool first_wake = true;
+	u32 loop_cnt;
 
 	while (!kthread_should_stop()) {
 		wait_for_completion_interruptible(&s->comp);
-		/* S6j: kthread 被 complete 唤醒的实锤事件（code9=1，一次性）——
-		 * dataread 不跑时区分"hrenable 没写成"vs"写了但 kthread 没醒" */
-		if (first_wake && s->input) {
-			input_report_abs(s->input, 9, 1);
+		loop_cnt++;
+		/* S6k+: 诊断心跳——每 20 轮报 loop_cnt（code9），证明 kthread
+		 * 活着且循环在跑；与 code8（init 结果）配对判别断点层级 */
+		if (s->input && (loop_cnt == 1 || loop_cnt % 20 == 0)) {
+			input_report_abs(s->input, 9, loop_cnt);
 			input_sync(s->input);
-			first_wake = false;
 		}
 		bd_16xx_dataread(s);
-		if (s->enabled)
-			complete(&s->comp);	/* factory re-arm	*/
+		/* S6k+: 诊断期无条件自续（心跳持续在线）——撤诊断时恢复
+		 * factory 条件语义 if (s->enabled) */
+		complete(&s->comp);
 		usleep_range(BD_POLL_US, BD_POLL_US);
 	}
 	return 0;
@@ -649,13 +651,14 @@ static int bd_probe(struct i2c_client *cli, const struct i2c_device_id *id)
 		if (!ret) {
 			bds->mode = 6;
 			bds->enabled = 1;
-			complete(&bds->comp);
 		}
 		if (bds->input) {
 			input_report_abs(bds->input, 8,
 					 ret < 0 ? 200 : 50);
 			input_sync(bds->input);	/* 50=probe 内成功/200+|ret|=失败 */
 		}
+		/* S6k+: 无论 init 成败都唤醒 kthread——心跳通道独立于 init 结果 */
+		complete(&bds->comp);
 	}
 
 	/* S8: factory data->test_kinds = 0x32 after power_init */
