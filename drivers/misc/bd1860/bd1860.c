@@ -304,7 +304,7 @@ static int bd_poll_task(void *data)
 {
 	struct bd_state *s = data;
 	bool first_wake = true;
-	u32 loop_cnt;
+	u32 loop_cnt = 0;
 
 	while (!kthread_should_stop()) {
 		wait_for_completion_interruptible(&s->comp);
