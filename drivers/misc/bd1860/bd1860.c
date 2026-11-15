@@ -59,6 +59,10 @@ static bool bd_dbg_en;
 module_param_named(dbg, bd_dbg_en, bool, 0644);
 MODULE_PARM_DESC(dbg, "per-frame debug prints: line=257 / r44-raw / r45-regs / r51-arrays");
 
+/* S6k5: 最近一次 bd44_init 结果位图（0=成功；100+1=Init挂；100+2=Start挂；
+ * 100+3=都挂）——心跳顺带携带，绕过"probe 时刻事件错过窗口"问题 */
+static u8 bd_init_result = 200;
+
 
 struct bd_chan {
 	u16	cur;			/* LED current / mux value			*/
@@ -172,9 +176,9 @@ static int bd44_init(int mode)
 	 * ——系统态日志全封（黑名单 #41），getevent 是唯一可读通道。
 	 * hrenable_store 执行与否、init 成败，一次事件全判明。 */
 	if (bds && bds->input) {
-		input_report_abs(bds->input, 8,
-				 (init_ok && start_ok) ? 0 :
-				 100 + (init_ok ? 0 : 1) + (start_ok ? 0 : 2));
+		bd_init_result = (u8)((init_ok && start_ok) ? 0 :
+				      100 + (init_ok ? 0 : 1) + (start_ok ? 0 : 2));
+		input_report_abs(bds->input, 8, bd_init_result);
 		input_sync(bds->input);
 	}
 	return (init_ok && start_ok) ? 0 : -EIO;
@@ -312,6 +316,8 @@ static int bd_poll_task(void *data)
 		 * 活着且循环在跑；与 code8（init 结果）配对判别断点层级 */
 		if (s->input && (loop_cnt == 1 || loop_cnt % 20 == 0)) {
 			input_report_abs(s->input, 9, loop_cnt);
+			/* S6k5: 心跳顺带携带 init 结果位图 */
+			input_report_abs(s->input, 8, bd_init_result);
 			input_sync(s->input);
 		}
 		bd_16xx_dataread(s);
