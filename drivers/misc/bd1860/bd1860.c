@@ -168,6 +168,15 @@ static int bd44_init(int mode)
 	start_ok = BD_Sensor_Start((u64)mode, wear_refdata);
 	pr_info("[gxy_bd1860] init_start: temp1=%d,temp2=%d (mode=%d)\n",
 		init_ok, start_ok, mode);
+	/* S6j: init 结果上 input（code8：0=成功；100+位图=Init/Start 失败）
+	 * ——系统态日志全封（黑名单 #41），getevent 是唯一可读通道。
+	 * hrenable_store 执行与否、init 成败，一次事件全判明。 */
+	if (bds && bds->input) {
+		input_report_abs(bds->input, 8,
+				 (init_ok && start_ok) ? 0 :
+				 100 + (init_ok ? 0 : 1) + (start_ok ? 0 : 2));
+		input_sync(bds->input);
+	}
 	return (init_ok && start_ok) ? 0 : -EIO;
 }
 
@@ -294,9 +303,17 @@ static void bd_16xx_dataread(struct bd_state *s)
 static int bd_poll_task(void *data)
 {
 	struct bd_state *s = data;
+	bool first_wake = true;
 
 	while (!kthread_should_stop()) {
 		wait_for_completion_interruptible(&s->comp);
+		/* S6j: kthread 被 complete 唤醒的实锤事件（code9=1，一次性）——
+		 * dataread 不跑时区分"hrenable 没写成"vs"写了但 kthread 没醒" */
+		if (first_wake && s->input) {
+			input_report_abs(s->input, 9, 1);
+			input_sync(s->input);
+			first_wake = false;
+		}
 		bd_16xx_dataread(s);
 		if (s->enabled)
 			complete(&s->comp);	/* factory re-arm	*/
@@ -575,6 +592,11 @@ static int bd_probe(struct i2c_client *cli, const struct i2c_device_id *id)
 		input_set_capability(bds->input, EV_ABS, ret);
 		input_set_abs_params(bds->input, ret, 0, 0xffff, 0, 0);
 	}
+	/* W527 S6j: init 结果(code8)/kthread 首帧(code9) capability */
+	input_set_capability(bds->input, EV_ABS, 8);
+	input_set_abs_params(bds->input, 8, 0, 0xffff, 0, 0);
+	input_set_capability(bds->input, EV_ABS, 9);
+	input_set_abs_params(bds->input, 9, 0, 0xffff, 0, 0);
 	ret = input_register_device(bds->input);
 	if (ret)
 		return ret;
