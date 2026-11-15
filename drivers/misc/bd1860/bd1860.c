@@ -303,7 +303,6 @@ static void bd_16xx_dataread(struct bd_state *s)
 static int bd_poll_task(void *data)
 {
 	struct bd_state *s = data;
-	bool first_wake = true;
 	u32 loop_cnt = 0;
 
 	while (!kthread_should_stop()) {
