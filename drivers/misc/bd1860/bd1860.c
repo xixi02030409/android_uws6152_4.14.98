@@ -163,7 +163,10 @@ static int bd44_init(int mode)
 		wear_refdata[0] = 1500;  wear_refdata[1] = 500;   wear_refdata[2] = 10;
 		break;
 	default:	/* 6: hrm (factory echo '1'/'3') */
-		sensor_refset[0] = 5; sensor_refset[1] = 0;  sensor_refset[2] = 2;
+		/* S6k6: 诊断实验——对照 factory 空闲态 dump_t2 实拍
+		 * （0x14/15/16=12/12/12），原 mode6 表 {5,0,2} 使 0x15=0，
+		 * LED 通道写 0；aux 恒 3117 暗侧冻结。定标后撤。 */
+		sensor_refset[0] = 12; sensor_refset[1] = 12; sensor_refset[2] = 12;
 		wear_refdata[0] = 1500;  wear_refdata[1] = 100;   wear_refdata[2] = 5;
 		break;
 	}
