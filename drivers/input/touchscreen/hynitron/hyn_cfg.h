@@ -22,7 +22,7 @@
 #define HYN_GKI_VER           (0) //GKI version need enable
 #define HYN_APK_DEBUG_EN      (1)
 
-#define HYN_GESTURE_EN        (0) //gesture
+#define HYN_GESTURE_EN        (1) //gesture  /* W527: 双击亮屏需要手势路径（默认仍关闭，sysfs 开启） */
 
 #define HYN_PROX_TYEP         (0) //0:disable 1:default 2:mtk_sensor 3:mtk_alps 4:Spread misc
 
