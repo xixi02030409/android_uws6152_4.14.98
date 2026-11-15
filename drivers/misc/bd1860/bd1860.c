@@ -276,6 +276,15 @@ static void bd_16xx_dataread(struct bd_state *s)
 		if (s->input) {
 			for (i = 0; i <= 4; i++)
 				input_report_abs(s->input, i, bd_data_result[i]);
+			/* W527 S6h: 诊断轴 —— 系统态日志全封（SELinux 拦 dmesg/
+			 * kallsyms/pstore/sysfs 属性），input 是 shell 唯一可读
+			 * 通道。getevent /dev/input/event2 直接看：
+			 *   code5 = ch_A AGC 电流（0..0x78；涨到顶不动=AGC 冻结）
+			 *   code6 = ch_A 最新 aux（settle 窗口 (0x2903,0x34bc]）
+			 *   code7 = 帧计数器（滚动 = dataread 采集循环活） */
+			input_report_abs(s->input, 5, bd44_dbg_cur(0));
+			input_report_abs(s->input, 6, bd44_dbg_raw_a(0));
+			input_report_abs(s->input, 7, bd44_dbg_phcount());
 			input_sync(s->input);
 		}
 	}
@@ -558,6 +567,11 @@ static int bd_probe(struct i2c_client *cli, const struct i2c_device_id *id)
 		return -ENOMEM;
 	bds->input->name = "bd1860";
 	for (ret = 0; ret <= 5; ret++) {
+		input_set_capability(bds->input, EV_ABS, ret);
+		input_set_abs_params(bds->input, ret, 0, 0xffff, 0, 0);
+	}
+	/* W527 S6h: 诊断轴 capability（见 bd_16xx_dataread 注释） */
+	for (ret = 6; ret <= 7; ret++) {
 		input_set_capability(bds->input, EV_ABS, ret);
 		input_set_abs_params(bds->input, ret, 0, 0xffff, 0, 0);
 	}
