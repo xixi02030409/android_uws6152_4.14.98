@@ -163,6 +163,39 @@ static int sprd_sip_svc_perf_get_parent(u32 id, u32 *p_parent_id)
 	return res.a0;
 }
 
+/* SIP power operations (W527 additive port from Unisoc 4.14.199 BSP) */
+#define SPRD_SIP_SVC_PWR_REV						\
+	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,				\
+			   ARM_SMCCC_SMC_32,				\
+			   ARM_SMCCC_OWNER_SIP,				\
+			   0x0500)
+
+#define SPRD_SIP_SVC_PWR_GET_WAKEUP_SOURCE_GET				\
+	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,				\
+			   ARM_SMCCC_SMC_32,				\
+			   ARM_SMCCC_OWNER_SIP,				\
+			   0x0501)
+
+static int sprd_sip_svc_pwr_get_wakeup_source(u32 *major,
+					      u32 *second, u32 *thrid)
+{
+	struct arm_smccc_res res;
+
+	arm_smccc_smc(SPRD_SIP_SVC_PWR_GET_WAKEUP_SOURCE_GET,
+		      0, 0, 0, 0, 0, 0, 0, &res);
+
+	if (major != NULL)
+		*major = res.a1;
+
+	if (second != NULL)
+		*second = res.a2;
+
+	if (thrid != NULL)
+		*thrid = res.a3;
+
+	return res.a0;
+}
+
 static int __init sprd_sip_svc_init(void)
 {
 	int ret = 0;
@@ -185,6 +218,18 @@ static int __init sprd_sip_svc_init(void)
 	pr_notice("SPRD SIP SVC PERF:v%d.%d detected in firmware.\n",
 		sprd_sip_svc_handle.perf_ops.rev.major_ver,
 		sprd_sip_svc_handle.perf_ops.rev.minor_ver);
+
+	/* init pwr_ops (W527 additive port) */
+	arm_smccc_smc(SPRD_SIP_SVC_PWR_REV, 0, 0, 0, 0, 0, 0, 0, &res);
+	sprd_sip_svc_handle.pwr_ops.rev.major_ver = res.a0;
+	sprd_sip_svc_handle.pwr_ops.rev.minor_ver = res.a1;
+
+	sprd_sip_svc_handle.pwr_ops.get_wakeup_source =
+					     sprd_sip_svc_pwr_get_wakeup_source;
+
+	pr_notice("SPRD SIP SVC PWR:v%d.%d detected in firmware.\n",
+		sprd_sip_svc_handle.pwr_ops.rev.major_ver,
+		sprd_sip_svc_handle.pwr_ops.rev.minor_ver);
 
 	return ret;
 }
