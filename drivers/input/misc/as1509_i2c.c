@@ -36,6 +36,9 @@
 #include <linux/delay.h>
 #include <linux/pm_wakeup.h>
 #include <linux/mutex.h>
+#include <linux/miscdevice.h>
+#include <linux/fs.h>
+#include <linux/uaccess.h>
 
 /* ---- 寄存器地图（factory 实证，勿改） ---- */
 #define AS1509_REG_CHIPID	0x00	/* 读，== 0x89 */
@@ -314,6 +317,16 @@ static void as1509_do_work(struct as1509_data *d)
 		pos = as1509_pos_by_ref(d, x, y, z);
 	as1509_report(d, pos);
 
+	/* W527 S6h: 诊断轴 —— 系统态日志全封（SELinux 拦 dmesg/kallsyms/pstore），
+	 * input 是 shell 唯一可读通道（组 1004）。getevent 直接看数据流：
+	 * ABS_X=angle(0..65535) ABS_Y/Z/RX=XYZ+32768（s16 偏移成 unsigned 域）。
+	 * input core 对相同值去重：转表冠时应看到值滚动 = 数据流活的铁证。 */
+	input_report_abs(d->input, ABS_X, angle);
+	input_report_abs(d->input, ABS_Y, (u16)(x + 32768));
+	input_report_abs(d->input, ABS_Z, (u16)(y + 32768));
+	input_report_abs(d->input, ABS_RX, (u16)(z + 32768));
+	input_sync(d->input);
+
 	/* 以最新读数为窗口中心重设三轴阈值（factory 顺序） */
 	mutex_lock(&d->lock);
 	as1509_set_threshold(d, 0, x);
@@ -436,6 +449,40 @@ static ssize_t as1509_enable_store(struct device *dev,
 
 static DEVICE_ATTR(och1970, 0664, as1509_show, as1509_store);
 static DEVICE_ATTR(enable, 0664, as1509_enable_show, as1509_enable_store);
+
+/* ---------------- W527 S6h: factory misc /dev/as1509 对齐 ----------------
+ * factory probe 反汇编实证：misc_register + /dev/as1509 + ioctl type 0x61，
+ * 命令表 17 个（0x40046102..0x4004611e）——反汇编定性为"对 data 偏移的
+ * 单字节读写"（__arch_copy_from/to_user 各 1 字节；读命令 0x610f/0x6110/
+ * 0x6111/0x6112/0x6114 分别读 data+0x3a/0x40/0x46/0x4c/0x52）。
+ * HAL 的出厂校准走这里写 4 个参考点（ref 全 0 时 factory 本尊只报 up 一次）。
+ * S6h 先注册骨架让 HAL 能 open 成功，ioctl 全 -ENOTTY：HAL 的调用/报错
+ * 会出现在它自己的 logcat（shell 可读），据此再精确实现所需命令。 */
+static long as1509_misc_ioctl(struct file *file, unsigned int cmd,
+			      unsigned long arg)
+{
+	pr_info("as1509 ioctl cmd=0x%08x arg=0x%08lx -> ENOTTY (S6h skeleton)\n",
+		cmd, arg);
+	return -ENOTTY;
+}
+
+static int as1509_misc_open(struct inode *inode, struct file *file)
+{
+	return 0;
+}
+
+static const struct file_operations as1509_misc_fops = {
+	.owner		= THIS_MODULE,
+	.open		= as1509_misc_open,
+	.unlocked_ioctl	= as1509_misc_ioctl,
+	.compat_ioctl	= as1509_misc_ioctl,
+};
+
+static struct miscdevice as1509_misc_dev = {
+	.minor	= MISC_DYNAMIC_MINOR,
+	.name	= "as1509",
+	.fops	= &as1509_misc_fops,
+};
 
 /* factory as1509_polling_work 的等价触发点：读一帧 + 位置判定（复用 irq_work） */
 static void as1509_do_work(struct as1509_data *d);
@@ -625,6 +672,15 @@ static int as1509_probe(struct i2c_client *client,
 	input_set_capability(d->input, EV_KEY, d->keycode[AS_POS_DOWN]);
 	input_set_capability(d->input, EV_KEY, d->keycode[AS_POS_FRONT]);
 	input_set_capability(d->input, EV_KEY, d->keycode[AS_POS_BACK]);
+	/* W527 S6h: 诊断轴 capability（见 do_work 注释） */
+	input_set_capability(d->input, EV_ABS, ABS_X);
+	input_set_capability(d->input, EV_ABS, ABS_Y);
+	input_set_capability(d->input, EV_ABS, ABS_Z);
+	input_set_capability(d->input, EV_ABS, ABS_RX);
+	input_set_abs_params(d->input, ABS_X, 0, 0xffff, 0, 0);
+	input_set_abs_params(d->input, ABS_Y, 0, 0xffff, 0, 0);
+	input_set_abs_params(d->input, ABS_Z, 0, 0xffff, 0, 0);
+	input_set_abs_params(d->input, ABS_RX, 0, 0xffff, 0, 0);
 	err = input_register_device(d->input);
 	if (err) {
 		wakeup_source_unregister(d->ws);
@@ -643,6 +699,12 @@ static int as1509_probe(struct i2c_client *client,
 	d->enabled = true;
 	queue_delayed_work(d->wq, &d->poll_dwork,
 			   msecs_to_jiffies(AS1509_POLL_MS));
+
+	/* W527 S6h: factory misc /dev/as1509（HAL open + 校准 ioctl 入口） */
+	if (misc_register(&as1509_misc_dev))
+		dev_err(dev, "misc_register(as1509) fail\n");
+	else
+		dev_info(dev, "misc /dev/as1509 ready\n");
 
 	d->och1970_class = class_create(THIS_MODULE, "och1970");
 	if (IS_ERR(d->och1970_class)) {
@@ -690,9 +752,10 @@ static int as1509_remove(struct i2c_client *client)
 	disable_irq_wake(d->irq);
 	free_irq(d->irq, d);
 	cancel_work_sync(&d->irq_work);
-	cancel_work_sync(&d->poll_work);
+	cancel_delayed_work_sync(&d->poll_dwork);	/* S6h: 修 poll_work 残留 */
 	if (d->wq)
 		destroy_workqueue(d->wq);
+	misc_deregister(&as1509_misc_dev);		/* S6h: misc 对应销毁 */
 	/* r55: factory och1970 sysfs 对应销毁（factory as1509_i2c_remove 语义） */
 	if (d->och1970_dev) {
 		device_remove_file(d->och1970_dev, &dev_attr_och1970);
