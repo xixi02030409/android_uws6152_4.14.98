@@ -530,6 +530,21 @@ static void hyn_resum_work(struct work_struct *work)
     hyn_resum(hyn_data->dev);
 }
 
+/* W527: PMIC EIC wake handler. The main touch IRQ sits on a sprd-gpio line
+ * which cannot wake the SoC from deep suspend; factory wires a second,
+ * level-tracked line through the PMIC EIC block. Reuse the driver's own
+ * resume work so the panel state is restored after the wake.
+ */
+static irqreturn_t hyn_eint_wake_handler(int irq, void *dev_id)
+{
+    struct hyn_ts_data *ts = (struct hyn_ts_data *)dev_id;
+    if (!IS_ERR_OR_NULL(ts) && !work_pending(&ts->work_resume)) {
+        HYN_INFO("EIC wake irq fired, schedule resume work");
+        schedule_work(&ts->work_resume);
+    }
+    return IRQ_HANDLED;
+}
+
 static irqreturn_t hyn_irq_handler(int irq, void *data)
 {
     HYN_ENTER();
@@ -831,6 +846,30 @@ static int hyn_ts_probe(struct spi_device *client)
     }
     atomic_set(&ts_data->irq_is_disable,ENABLE);
     hyn_irq_set(ts_data , DISABLE);
+
+    /* W527: PMIC EIC wake irq (DTB "hynitron,irq-eic"). Factory has this
+     * dual-interrupt setup; V2.23 upstream carried only the main irq, so the
+     * panel could never wake the SoC from deep suspend -> double-tap lost.
+     */
+    if (client->dev.of_node) {
+        int eic_gpio = of_get_named_gpio(client->dev.of_node, "hynitron,irq-eic", 0);
+        if (eic_gpio >= 0) {
+            int eic_irq = gpio_to_irq(eic_gpio);
+            if (eic_irq >= 0) {
+                int wret = request_threaded_irq(eic_irq, NULL, hyn_eint_wake_handler,
+                                                IRQF_TRIGGER_RISING | IRQF_ONESHOT,
+                                                "Hynitron Touch Wake Int", ts_data);
+                if (wret == 0) {
+                    enable_irq_wake(eic_irq);
+                    HYN_INFO("EIC wake irq=%d (gpio=%d) registered", eic_irq, eic_gpio);
+                } else {
+                    HYN_ERROR("EIC wake irq request failed: %d", wret);
+                }
+            }
+        } else {
+            HYN_INFO("no hynitron,irq-eic prop (ret=%d)", eic_gpio);
+        }
+    }
 
 #if defined(CONFIG_FB)
 #if (HYN_RK_FB==1)
