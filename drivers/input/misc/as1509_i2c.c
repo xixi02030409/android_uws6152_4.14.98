@@ -638,6 +638,11 @@ static int as1509_probe(struct i2c_client *client,
 	 * -> wakeup_source_register("as1509_wakelock") */
 	d->wq = alloc_workqueue("as1509-work-queue", WQ_UNBOUND, 1);
 	INIT_DELAYED_WORK(&d->poll_dwork, as1509_poll_work_fn);
+	/* W527: 默认开常驻轮询 —— 表冠开箱即用（EIC-async irq 只作备用） */
+	d->poll_on = true;
+	d->enabled = true;
+	queue_delayed_work(d->wq, &d->poll_dwork,
+			   msecs_to_jiffies(AS1509_POLL_MS));
 
 	d->och1970_class = class_create(THIS_MODULE, "och1970");
 	if (IS_ERR(d->och1970_class)) {
