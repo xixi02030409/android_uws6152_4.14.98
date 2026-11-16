@@ -730,11 +730,12 @@ static int as1509_probe(struct i2c_client *client,
 	 * -> wakeup_source_register("as1509_wakelock") */
 	d->wq = alloc_workqueue("as1509-work-queue", WQ_UNBOUND, 1);
 	INIT_DELAYED_WORK(&d->poll_dwork, as1509_poll_work_fn);
-	/* W527: 默认开常驻轮询 —— 表冠开箱即用（EIC-async irq 只作备用） */
-	d->poll_on = true;
-	d->enabled = true;
-	queue_delayed_work(d->wq, &d->poll_dwork,
-			   msecs_to_jiffies(AS1509_POLL_MS));
+	/* S6l: 常驻轮询撤除（诊断期 S6g2~S6k5 开启过）——实测 50ms 轮询 =
+	 * wakeup_sources event3 打 17K+ 次唤醒 = 深睡杀手 #1（开机 7 分钟即
+	 * 17K 次，灭屏也不停）。回归 factory 语义：HAL och1970 store '1' 才开。
+	 * 表冠属非常规外设（用户定调"没人用"），息就息了。 */
+	d->poll_on = false;
+	d->enabled = false;
 
 	/* W527 S6h: factory misc /dev/as1509（HAL open + 校准 ioctl 入口） */
 	if (misc_register(&as1509_misc_dev))
